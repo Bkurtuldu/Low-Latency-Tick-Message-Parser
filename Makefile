@@ -1,16 +1,12 @@
-# --- Compiler (defaults to your local GCC 8.5.0) ---
-CXX ?= /usr/local/gcc-8.5.0/bin/g++-8.5.0
+CXX      ?= g++
 
-# --- Flags ---
 CXXFLAGS := -std=c++11 -O2 -Wall -Wextra -pedantic
 INCS     := -Iinclude
 
-# --- Files ---
-SRCS := src/main.cpp src/moldudp64.cpp src/itch.cpp
+SRCS := $(wildcard src/*.cpp)
 OBJS := $(SRCS:.cpp=.o)
-BIN  := reader
+BIN  := strategy_simulator
 
-# --- Build ---
 all: clean $(BIN)
 
 $(BIN): $(OBJS)
@@ -19,7 +15,6 @@ $(BIN): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(INCS) -c $< -o $@
 
-# --- Helpers ---
 run: $(BIN)
 	./$(BIN) $(ARGS)
 

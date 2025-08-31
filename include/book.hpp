@@ -2,56 +2,52 @@
 #include <cstdint>
 #include <map>
 #include <unordered_map>
-#include <log.hpp>
+#include "log.hpp"
 
 struct OBOrder {
     uint64_t id = 0;
-    char side = 'B';          // 'B' or 'S'
-    uint32_t price = 0;       // integer price (ticks/kuruş)
+    char side = 'B'; 
+    uint32_t price = 0;  
     uint32_t qty = 0;
+    uint64_t ts_ns = 0; 
     OBOrder() = default;
-    OBOrder(uint64_t i, char s, uint32_t p, uint32_t q)
-        : id(i), side(s), price(p), qty(q) {}
+    OBOrder(uint64_t i, char s, uint32_t p, uint32_t q, uint64_t ns=0)
+        : id(i), side(s), price(p), qty(q), ts_ns(ns) {}
 };
+
 
 class OrderBook {
 public:
-    static std::string make_key(uint64_t id, char side) {
-        return std::to_string(id) + side;
+
+    // Inline key creation for by_id map
+    static inline uint64_t make_key(uint64_t id, char side) noexcept {
+        return (id << 1) | (side == 'S' ? 1ull : 0ull);
     }
 
-    void on_add(uint64_t id, char side, uint32_t price, uint32_t qty) {
+    // Add a new order
+    // Create key and keep in by_id map
+    // Update bids or asks map
+    void on_add(uint64_t id, char side, uint32_t price, uint32_t qty, uint64_t ts_ns) {
         if (qty == 0) return;
-        OBOrder o{id, side, price, qty};
+        OBOrder o{id, side, price, qty, ts_ns};
         by_id[make_key(id, side)] = o;
 
         auto& book = (side == 'B') ? bids : asks;
         book[price] += qty;
-
-        // log_info("BOOK", "ADD id=" + std::to_string(id) +
-        //                 " side=" + std::string(1, side) +
-        //                 " px=" + std::to_string(price) +
-        //                 " qty=" + std::to_string(qty));
-
-        // std::string oline = "ORDERS: ";
-        // for (const auto& kv : by_id) {
-        //     const auto& o = kv.second;
-        //     oline += "[id=" + std::to_string(o.id) +
-        //              " side=" + std::string(1, o.side) +
-        //              " px=" + std::to_string(o.price) +
-        //              " qty=" + std::to_string(o.qty) + "] ";
-        // }
-
-        // dump_state("AFTER ADD");
     }
 
-    void on_exec(uint64_t id, char side, uint32_t exec_qty) {
+    // Execute an order
+    // Find order by id and side
+    // Update or remove from bids or asks map
+    // Update last executed price
+    void on_exec(uint64_t id, char side, uint32_t exec_qty, uint64_t ts_ns) {
         auto it = by_id.find(make_key(id, side));
         if (it == by_id.end() || exec_qty == 0) return;
 
         OBOrder& o = it->second;
         if (exec_qty > o.qty) exec_qty = o.qty;
         o.qty -= exec_qty;
+        o.ts_ns = ts_ns;
 
         auto& book = (o.side == 'B') ? bids : asks;
         auto pit = book.find(o.price);
@@ -61,15 +57,13 @@ public:
         }
         if (o.qty == 0) by_id.erase(it);
 
-        if (side == 'S') last_sell_price_ = o.price;
-        else             last_buy_price_ = o.price;
-
-        // log_info("BOOK", "EXEC id=" + std::to_string(id) +
-        //                 " side=" + std::string(1, o.side) +
-        //                 " px=" + std::to_string(o.price) +
-        //                 " exec_qty=" + std::to_string(exec_qty));
+        last_executed_price_ = o.price;
     }
 
+    // Delete an order
+    // Find order by id and side
+    // Update or remove from bids or asks map
+    // Remove from by_id map
     void on_delete(uint64_t id, char side) {
         auto it = by_id.find(make_key(id, side));
         if (it == by_id.end()) return;
@@ -82,53 +76,29 @@ public:
             else                      pit->second -= o.qty;
         }
         by_id.erase(it);
-
-        // log_info("BOOK", "DEL id=" + std::to_string(id) +
-        //                 " side=" + std::string(1, o.side) +
-        //                 " px=" + std::to_string(o.price) +
-        //                 " qty=" + std::to_string(o.qty));
     }
 
-    // Best levels
+    // Get best bid price; return false if no bids
     bool best_bid(uint32_t &px) const {
         if (bids.empty()) return false;
-        px = bids.rbegin()->first; // highest price
+        px = bids.rbegin()->first;
         return true;
     }
+    // Get best ask price; return false if no asks
     bool best_ask(uint32_t &px) const {
         if (asks.empty()) return false;
-        px = asks.begin()->first; // lowest price
+        px = asks.begin()->first;
         return true;
     }
 
-    uint32_t last_sell_price() const { return last_sell_price_; }
-    uint32_t last_buy_price() const { return last_buy_price_; }
+
+    uint32_t last_executed_price() const { return last_executed_price_; }
 
 private:
-    // price -> agg qty
-    std::map<uint32_t, uint64_t> bids;                   // ascending; use rbegin for best
-    std::map<uint32_t, uint64_t> asks;                   // ascending; begin is best
-    std::unordered_map<std::string, OBOrder> by_id;         // order detail
-    uint32_t last_sell_price_;
-    uint32_t last_buy_price_;
- 
-    void dump_state(const std::string& tag) const {
-        log_info("BOOK", "---- " + tag + " DUMP ----");
+    std::map<uint32_t, uint64_t> bids; // ascending, so best bid is rbegin(), O(1)
+    std::map<uint32_t, uint64_t> asks; // ascending, so best ask is begin(), O(1)
 
-        // Print bids
-        std::string bline = "BIDS: ";
-        for (auto it = bids.rbegin(); it != bids.rend(); ++it) {
-            bline += "[px=" + std::to_string(it->first) +
-                     " qty=" + std::to_string(it->second) + "] ";
-        }
-        log_info("BOOK", bline);
+    std::unordered_map<uint64_t, OBOrder> by_id; // O(1) access by (id,side) key
 
-        // Print asks
-        std::string aline = "ASKS: ";
-        for (auto it = asks.begin(); it != asks.end(); ++it) {
-            aline += "[px=" + std::to_string(it->first) +
-                     " qty=" + std::to_string(it->second) + "] ";
-        }
-        log_info("BOOK", aline);
-    }
+    uint32_t last_executed_price_ = 0; // to finalize PnL with inventory
 };

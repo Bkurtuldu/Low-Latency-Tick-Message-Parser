@@ -1,0 +1,2 @@
+[PNL] Finalizing long inventory pos=9300 at last_sell_price=19170 cash=178281000 new PnL=1036000
+Execution time: 0.650979 seconds

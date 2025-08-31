@@ -5,13 +5,13 @@
 #include <vector>
 
 struct MoldHeader {
-    std::string session;   // 10 bytes ASCII
-    uint64_t first_seq;    // big-endian
-    uint16_t msg_count;    // big-endian
+    std::string session;  
+    uint64_t first_seq;  
+    uint16_t msg_count;   
 };
 
 struct MoldMessage {
-    std::vector<unsigned char> payload; // raw ITCH bytes (not parsed yet)
+    std::vector<unsigned char> payload;
 };
 
 class MoldUDP64Reader {
